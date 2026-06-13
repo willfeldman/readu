@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-paper text-ink font-sans antialiased;
+}
+
+::selection {
+  background: rgba(108, 74, 226, 0.18);
+}
+
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display tracking-tight;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-card bg-surface shadow-soft;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-semibold transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-primary {
+    @apply btn rounded-pill bg-primary text-white px-6 py-3.5 shadow-glow hover:bg-primary-600 hover:-translate-y-0.5;
+  }
+
+  .btn-secondary {
+    @apply btn rounded-pill bg-ink text-white px-6 py-3.5 hover:bg-ink/90 hover:-translate-y-0.5;
+  }
+
+  .btn-ghost {
+    @apply btn rounded-pill bg-primary-soft text-primary-700 px-5 py-2.5 hover:bg-primary-100;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-pill px-3 py-1 text-sm font-semibold;
+  }
+}
+
+/* Reading passage typography */
+.reading {
+  font-size: var(--reading-size, 1.15rem);
+  line-height: 1.9;
+  letter-spacing: 0.003em;
+}
+.reading p {
+  margin-bottom: 1.15em;
+}
+.reading p:last-child {
+  margin-bottom: 0;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(108, 74, 226, 0.22);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(108, 74, 226, 0.4);
+  background-clip: content-box;
+}
+
+/* Honor reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
