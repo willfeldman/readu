@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { Profile, SessionMode } from "@/lib/types";
 import { newProfile } from "@/lib/adaptive";
 import { useProfile } from "@/lib/store";
+import { prefetchNext } from "@/lib/prefetch";
 import { Background } from "@/components/Background";
 import { Logo } from "@/components/Logo";
 import { Onboarding } from "@/components/Onboarding";
@@ -60,6 +61,8 @@ export default function Home() {
   function handleComplete(updated: Profile) {
     setProfile(updated);
     setScreen("dashboard");
+    // Warm the next passage so "Start a reading" from the dashboard is instant.
+    if (updated.baselineDone) prefetchNext(updated);
   }
 
   function handleAnother(updated: Profile) {

@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, ArrowRight, RotateCcw, X } from "lucide-react";
-import type { AnswerRecord, Passage, Profile, SessionMode } from "@/lib/types";
+import type { AnswerRecord, Band, Passage, PassageRequest, Profile, SessionMode } from "@/lib/types";
 import { applySession, nextFocusSkills, type SessionOutcome } from "@/lib/adaptive";
 import { interestLabel } from "@/lib/skills";
-import { fetchPassage } from "@/lib/api";
+import { fetchPassage, streamPassage, type StreamMeta } from "@/lib/api";
+import { consumePrefetch, prefetchNext } from "@/lib/prefetch";
 import { Loader } from "./Loader";
 import { Logo } from "./Logo";
 import { PassageReader } from "./PassageReader";
@@ -30,6 +31,8 @@ export function ReadingSession({
 }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [passage, setPassage] = useState<Passage | null>(null);
+  const [streamText, setStreamText] = useState("");
+  const [streamMeta, setStreamMeta] = useState<StreamMeta | null>(null);
   const [note, setNote] = useState<string | undefined>();
   const [err, setErr] = useState("");
   const [qIndex, setQIndex] = useState(0);
@@ -46,21 +49,71 @@ export function ReadingSession({
     setAnsweredCurrent(false);
     setOutcome(null);
     setPassage(null);
+    setStreamText("");
+    setStreamMeta(null);
+    setNote(undefined);
+
+    const req: PassageRequest = {
+      interests: profile.interests,
+      level: profile.level,
+      focusSkills: mode === "baseline" ? [] : nextFocusSkills(profile),
+      mode,
+      excludeTitles: profile.sessions.slice(0, 8).map((s) => s.passageTitle),
+      readerName: profile.name,
+    };
+
+    // 1. Instant path: a matching passage was prefetched while the reader worked.
+    if (mode === "practice") {
+      const pre = consumePrefetch(profile);
+      if (pre) {
+        try {
+          const res = await pre;
+          setPassage(res.passage);
+          setNote(res.note);
+          setPhase("reading");
+          return;
+        } catch {
+          /* fall through to streaming */
+        }
+      }
+    }
+
+    // 2. Stream the passage live (token-by-token), with a non-stream fallback.
+    let resolved = false;
     try {
-      const res = await fetchPassage({
-        interests: profile.interests,
-        level: profile.level,
-        focusSkills: mode === "baseline" ? [] : nextFocusSkills(profile),
-        mode,
-        excludeTitles: profile.sessions.slice(0, 8).map((s) => s.passageTitle),
-        readerName: profile.name,
+      await streamPassage(req, {
+        onMeta: (m) => {
+          setStreamMeta(m);
+          setPhase("reading");
+        },
+        onToken: (t) => setStreamText((s) => s + t),
+        onComplete: (p, n) => {
+          resolved = true;
+          setPassage(p);
+          setNote(n);
+          setPhase("reading");
+        },
+        onVerified: (v) => setPassage((prev) => (prev ? { ...prev, verification: v } : prev)),
+        onError: (msg) => {
+          resolved = true;
+          setErr(msg);
+          setPhase("error");
+        },
       });
-      setPassage(res.passage);
-      setNote(res.note);
-      setPhase("reading");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Something went wrong.");
-      setPhase("error");
+    } catch {
+      // streaming transport failed entirely → non-stream fallback (library / no-key)
+    }
+
+    if (!resolved) {
+      try {
+        const res = await fetchPassage(req);
+        setPassage(res.passage);
+        setNote(res.note);
+        setPhase("reading");
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Something went wrong.");
+        setPhase("error");
+      }
     }
   }, [profile, mode]);
 
@@ -83,10 +136,32 @@ export function ReadingSession({
       setQIndex((i) => i + 1);
       setAnsweredCurrent(false);
     } else {
-      setOutcome(applySession(profile, passage, answers, mode));
+      const o = applySession(profile, passage, answers, mode);
+      setOutcome(o);
       setPhase("results");
+      // Prefetch the next passage now (using the updated profile) so the next start is instant.
+      prefetchNext(o.profile);
     }
   }
+
+  // While streaming we render a partial passage built from meta + accumulated text.
+  const streamingPassage: Passage | null = streamMeta
+    ? {
+        id: "streaming",
+        title: "",
+        summary: "",
+        passage: streamText,
+        interestId: streamMeta.interestId,
+        interestLabel: streamMeta.interestLabel,
+        band: streamMeta.band as Band,
+        grade: streamMeta.grade,
+        questions: [],
+        vocabulary: [],
+        source: "ai",
+      }
+    : null;
+  const reading = passage ?? streamingPassage;
+  const isStreaming = !passage && !!streamMeta;
 
   const total = passage?.questions.length ?? 0;
   const progress = total > 0 ? ((qIndex + (answeredCurrent ? 1 : 0)) / total) * 100 : 0;
@@ -158,9 +233,16 @@ export function ReadingSession({
           </motion.div>
         )}
 
-        {phase === "reading" && passage && (
+        {phase === "reading" && reading && (
           <motion.div key="reading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <PassageReader passage={passage} note={note} onStartQuestions={() => setPhase("questions")} />
+            <PassageReader
+              passage={reading}
+              note={note}
+              streaming={isStreaming}
+              onStartQuestions={() => {
+                if (passage) setPhase("questions");
+              }}
+            />
           </motion.div>
         )}
 

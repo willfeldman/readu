@@ -2,27 +2,33 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, BadgeCheck, BookOpen, Clock, Library, Minus, Plus, Sparkles } from "lucide-react";
+import { ArrowRight, BadgeCheck, BookOpen, Clock, Library, Loader2, Minus, Plus, Sparkles } from "lucide-react";
 import type { Passage } from "@/lib/types";
 import { interestEmoji } from "@/lib/skills";
 
 const SIZES = ["1.02rem", "1.18rem", "1.36rem"];
 
+const Caret = () => (
+  <span className="ml-0.5 inline-block h-[1.05em] w-[3px] translate-y-[2px] animate-pulse rounded-sm bg-primary align-middle" />
+);
+
 export function PassageReader({
   passage,
   onStartQuestions,
   note,
+  streaming = false,
 }: {
   passage: Passage;
   onStartQuestions: () => void;
   note?: string;
+  streaming?: boolean;
 }) {
   const [sz, setSz] = useState(1);
   const paragraphs = passage.passage
     .split(/\n+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  const words = passage.passage.trim().split(/\s+/).length;
+  const words = passage.passage.trim() ? passage.passage.trim().split(/\s+/).length : 0;
   const minutes = Math.max(1, Math.round(words / 200));
 
   return (
@@ -34,12 +40,14 @@ export function PassageReader({
               {interestEmoji(passage.interestId)} {passage.interestLabel}
             </span>
             <span className="chip bg-white/80 text-ink">Grade {passage.grade}</span>
-            <span className="chip bg-white/80 text-ink-soft">
-              <Clock size={13} /> {minutes} min read
-            </span>
+            {words > 0 && (
+              <span className="chip bg-white/80 text-ink-soft">
+                <Clock size={13} /> {minutes} min read
+              </span>
+            )}
             {passage.source === "ai" ? (
               <span className="chip bg-primary text-white">
-                <Sparkles size={13} /> Written for you · Opus 4.8
+                <Sparkles size={13} /> {streaming ? "Writing live · Opus 4.8" : "Written for you · Opus 4.8"}
               </span>
             ) : (
               <span className="chip bg-ink text-white">
@@ -47,18 +55,25 @@ export function PassageReader({
               </span>
             )}
             {passage.verification?.pass && (
-              <span className="chip bg-mint-soft text-mint-dark" title="Opus 4.8 graded this against ReadU's quality rubric">
+              <span
+                className="chip bg-mint-soft text-mint-dark"
+                title="Opus 4.8 graded this against ReadU's quality rubric"
+              >
                 <BadgeCheck size={13} /> Verified by Opus
               </span>
             )}
           </div>
-          <h1 className="text-2xl font-extrabold leading-tight sm:text-3xl">{passage.title}</h1>
+          {passage.title ? (
+            <h1 className="text-2xl font-extrabold leading-tight sm:text-3xl">{passage.title}</h1>
+          ) : (
+            <div className="h-8 w-2/3 animate-pulse rounded-lg bg-white/60" />
+          )}
           {passage.summary && <p className="mt-2 text-ink-soft">{passage.summary}</p>}
         </div>
 
         <div className="flex items-center justify-between px-6 pt-4 sm:px-8">
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">
-            <BookOpen size={14} /> Read closely
+            <BookOpen size={14} /> {streaming ? "Writing…" : "Read closely"}
           </span>
           <div className="flex items-center gap-1">
             <button
@@ -83,8 +98,16 @@ export function PassageReader({
 
         <div className="reading px-6 py-5 text-ink sm:px-8" style={{ ["--reading-size" as never]: SIZES[sz] }}>
           {paragraphs.map((p, i) => (
-            <p key={i}>{p}</p>
+            <p key={i}>
+              {p}
+              {streaming && i === paragraphs.length - 1 && <Caret />}
+            </p>
           ))}
+          {streaming && paragraphs.length === 0 && (
+            <p className="text-ink-faint">
+              <Caret />
+            </p>
+          )}
         </div>
 
         {passage.vocabulary && passage.vocabulary.length > 0 && (
@@ -105,8 +128,16 @@ export function PassageReader({
       {note && <p className="mx-auto mt-3 max-w-md text-center text-xs text-ink-faint">{note}</p>}
 
       <div className="sticky bottom-4 z-10 mt-5 flex justify-center">
-        <button className="btn-primary text-lg" onClick={onStartQuestions}>
-          I&apos;m ready — start questions <ArrowRight size={20} />
+        <button className="btn-primary text-lg" onClick={onStartQuestions} disabled={streaming}>
+          {streaming ? (
+            <>
+              <Loader2 size={20} className="animate-spin" /> Writing your passage…
+            </>
+          ) : (
+            <>
+              I&apos;m ready — start questions <ArrowRight size={20} />
+            </>
+          )}
         </button>
       </div>
     </motion.div>

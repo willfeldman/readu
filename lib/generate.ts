@@ -1,9 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { Passage, PassageRequest, RawPassage, VerificationResult } from "./types";
+import type { Passage, PassageRequest, RawPassage, SessionMode, SkillId, VerificationResult } from "./types";
 import { bandForLevel, clamp } from "./adaptive";
 import { INTEREST_MAP, INTERESTS, SKILL_MAP } from "./skills";
 import { toPassage } from "./content";
-import { PASSAGE_SCHEMA, validatePassageShape } from "./schema";
+import { PASSAGE_SCHEMA, QUESTIONS_SCHEMA, validatePassageShape } from "./schema";
 import { verifyPassage, type VerifyContext } from "./verify";
 
 const MODEL = "claude-opus-4-8";
@@ -23,7 +23,7 @@ function wordsForGrade(grade: number): string {
   return "440-560 words";
 }
 
-function chooseInterest(interests: string[]): { id: string; label: string } {
+export function chooseInterest(interests: string[]): { id: string; label: string } {
   const pool = interests.filter((i) => INTEREST_MAP[i]);
   const id = pool.length
     ? pool[Math.floor(Math.random() * pool.length)]
@@ -177,4 +177,116 @@ export async function generateVerifiedPassage(req: PassageRequest): Promise<Pass
     return { ...second, verification: { ...secondVerif, attempts: 2, regenerated: true } };
   }
   return { ...first, verification: { ...firstVerif, attempts: 2, regenerated: true } };
+}
+
+// ─── Streaming generation (Phase 2) ───────────────────────────────────────────
+
+const PROSE_SYSTEM = `You are ReadU's reading-content engine. Write ONLY the reading passage prose for a middle-school student — no title, no questions, no headings, no labels, no markdown. Calibrate vocabulary and sentence length to the requested grade. Be engaging and age-appropriate; if informational, be factually accurate. Separate paragraphs with a blank line.`;
+
+function prosePrompt(req: PassageRequest, interestLabel: string, grade: number): string {
+  const excludeLine =
+    req.excludeTitles && req.excludeTitles.length
+      ? `\nAvoid repeating these recent topics: ${req.excludeTitles.slice(0, 8).join("; ")}.`
+      : "";
+  return `Write a reading passage for a U.S. Grade ${grade} student about: ${interestLabel}.
+Length: ${wordsForGrade(grade)}. Genre: an informational article OR a short narrative story — whichever best fits the theme and is most engaging.${excludeLine}
+
+Write ONLY the passage text itself. No title, no questions, no headings.`;
+}
+
+/** Stream the passage prose token-by-token via Opus 4.8. Returns the full text. */
+export async function streamPassageProse(
+  req: PassageRequest,
+  interest: { id: string; label: string },
+  grade: number,
+  onToken: (t: string) => void,
+): Promise<string> {
+  if (!process.env.ANTHROPIC_API_KEY) throw new NoApiKeyError();
+  const client = new Anthropic();
+  const stream: any = client.messages.stream({
+    model: MODEL,
+    max_tokens: 2000,
+    output_config: { effort: "low" },
+    system: PROSE_SYSTEM,
+    messages: [{ role: "user", content: prosePrompt(req, interest.label, grade) }],
+  } as any);
+
+  let full = "";
+  for await (const event of stream) {
+    if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+      const t: string = event.delta.text;
+      full += t;
+      onToken(t);
+    }
+  }
+  if (typeof stream.finalMessage === "function") {
+    await stream.finalMessage().catch(() => {});
+  }
+  if (full.trim().length < 40) throw new Error("Prose stream produced too little text");
+  return full.trim();
+}
+
+const QUESTIONS_SYSTEM = `You are ReadU's assessment author. Given a finished passage, write a catchy title, a one-sentence spoiler-free summary, exactly 5 multiple-choice comprehension questions (each with exactly 4 options and one defensibly-correct answer), and exactly 4 vocabulary words that appear in the passage with kid-friendly definitions. correctIndex is 0-based. Base everything ONLY on the given passage.`;
+
+function questionsPrompt(
+  passageText: string,
+  interestLabel: string,
+  grade: number,
+  focusSkills: SkillId[],
+  mode: SessionMode,
+): string {
+  const focus = (focusSkills ?? []).map((s) => SKILL_MAP[s]?.label).filter(Boolean) as string[];
+  const focusLine =
+    mode === "baseline"
+      ? `Use a balanced spread of comprehension skills.`
+      : focus.length
+        ? `Weight the questions toward: ${focus.join(", ")}. Still include at least one main idea, one inference, and one vocabulary question.`
+        : `Include a mix of skills, with at least one main idea, one inference, and one vocabulary question.`;
+  return `Passage (U.S. Grade ${grade}, theme: ${interestLabel}):
+
+"""
+${passageText}
+"""
+
+${focusLine}
+
+Return the structured object only.`;
+}
+
+export interface QuestionSet {
+  title: string;
+  summary: string;
+  questions: Passage["questions"];
+  vocabulary: Passage["vocabulary"];
+}
+
+/** Generate title/summary/questions/vocabulary for an already-written passage. */
+export async function generateQuestionsForPassage(
+  passageText: string,
+  ctx: { interestLabel: string; grade: number; focusSkills: SkillId[]; mode: SessionMode },
+): Promise<QuestionSet> {
+  if (!process.env.ANTHROPIC_API_KEY) throw new NoApiKeyError();
+  const client = new Anthropic();
+  const response: any = await client.messages.create(
+    {
+      model: MODEL,
+      max_tokens: 3000,
+      output_config: { effort: "low", format: { type: "json_schema", schema: QUESTIONS_SCHEMA } },
+      system: QUESTIONS_SYSTEM,
+      messages: [
+        { role: "user", content: questionsPrompt(passageText, ctx.interestLabel, ctx.grade, ctx.focusSkills, ctx.mode) },
+      ],
+    } as any,
+    { timeout: 90000, maxRetries: 0 },
+  );
+  const text: string | undefined = (response.content ?? []).find((b: any) => b.type === "text")?.text;
+  if (!text) throw new Error("No questions content returned from model");
+  const parsed = JSON.parse(text) as QuestionSet;
+  const shape = validatePassageShape({
+    passage: passageText,
+    questions: parsed.questions,
+    vocabulary: parsed.vocabulary,
+  });
+  if (!shape.ok) throw new Error(`Malformed question set: ${shape.errors.join("; ")}`);
+  return parsed;
 }

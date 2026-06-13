@@ -55,6 +55,19 @@ export const PASSAGE_SCHEMA = {
   required: ["title", "summary", "passage", "questions", "vocabulary"],
 };
 
+/** Same as PASSAGE_SCHEMA but without `passage` — used when the passage text is supplied. */
+export const QUESTIONS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    title: PASSAGE_SCHEMA.properties.title,
+    summary: PASSAGE_SCHEMA.properties.summary,
+    questions: PASSAGE_SCHEMA.properties.questions,
+    vocabulary: PASSAGE_SCHEMA.properties.vocabulary,
+  },
+  required: ["title", "summary", "questions", "vocabulary"],
+};
+
 /** Tolerant "does this word appear in the passage" check (handles plurals/tenses). */
 export function appearsIn(word: string, passage: string): boolean {
   const hay = passage.toLowerCase();
