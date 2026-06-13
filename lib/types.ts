@@ -27,6 +27,22 @@ export interface VocabWord {
   definition: string;
 }
 
+/** One rubric criterion's verdict from the self-grader. */
+export interface CriterionResult {
+  id: string;
+  pass: boolean;
+  note: string;
+}
+
+/** Result of Opus 4.8 grading a generated passage against rubric.json. */
+export interface VerificationResult {
+  pass: boolean;
+  perCriterion: CriterionResult[];
+  critique: string;
+  attempts: number; // generation attempts made (1 or 2)
+  regenerated: boolean; // true if a regeneration happened after a failed grade
+}
+
 /** A complete reading unit: one passage + its question set. */
 export interface Passage {
   id: string;
@@ -40,6 +56,7 @@ export interface Passage {
   questions: Question[];
   vocabulary: VocabWord[];
   source: PassageSource;
+  verification?: VerificationResult;
 }
 
 /** Raw passage as produced by the model / stored in the seed library. */

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, BookOpen, Clock, Library, Minus, Plus, Sparkles } from "lucide-react";
+import { ArrowRight, BadgeCheck, BookOpen, Clock, Library, Minus, Plus, Sparkles } from "lucide-react";
 import type { Passage } from "@/lib/types";
 import { interestEmoji } from "@/lib/skills";
 
@@ -44,6 +44,11 @@ export function PassageReader({
             ) : (
               <span className="chip bg-ink text-white">
                 <Library size={13} /> ReadU library
+              </span>
+            )}
+            {passage.verification?.pass && (
+              <span className="chip bg-mint-soft text-mint-dark" title="Opus 4.8 graded this against ReadU's quality rubric">
+                <BadgeCheck size={13} /> Verified by Opus
               </span>
             )}
           </div>

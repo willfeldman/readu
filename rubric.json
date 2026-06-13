@@ -1,0 +1,67 @@
+{
+  "name": "ReadU passage quality rubric",
+  "version": 1,
+  "audience": "U.S. middle-school students, ages 10-14",
+  "wordRanges": {
+    "emerging": { "grade": 4, "min": 190, "max": 260 },
+    "growing": { "grade": 6, "min": 300, "max": 410 },
+    "advanced": { "grade": 8, "min": 440, "max": 560 }
+  },
+  "criteria": [
+    {
+      "id": "reading_level",
+      "label": "Reading level",
+      "critical": true,
+      "description": "The estimated U.S. grade level of the passage is within ±1 grade of the target grade."
+    },
+    {
+      "id": "length",
+      "label": "Length",
+      "critical": false,
+      "description": "Passage word count falls within the requested range for the grade band (G4: 190-260, G6: 300-410, G8: 440-560 words)."
+    },
+    {
+      "id": "question_count",
+      "label": "Question count & format",
+      "critical": true,
+      "description": "Exactly 5 multiple-choice questions, each with exactly 4 answer options."
+    },
+    {
+      "id": "single_correct",
+      "label": "Single correct answer",
+      "critical": true,
+      "description": "Each question has exactly one defensibly-correct answer, and correctIndex points to it."
+    },
+    {
+      "id": "plausible_distractors",
+      "label": "Plausible distractors",
+      "critical": false,
+      "description": "The wrong options are plausible but clearly incorrect to a careful reader of the passage (not absurd, not arguable)."
+    },
+    {
+      "id": "skill_match",
+      "label": "Skill match",
+      "critical": false,
+      "description": "Each question's declared skill label matches the skill the question actually tests, and any requested focus skills are represented."
+    },
+    {
+      "id": "vocabulary_grounded",
+      "label": "Vocabulary grounded",
+      "critical": true,
+      "description": "Every vocabulary word actually appears in the passage, and each definition is accurate and kid-friendly."
+    },
+    {
+      "id": "age_appropriate",
+      "label": "Age appropriate",
+      "critical": true,
+      "description": "No violence, romance, or frightening content; tone and topics are suitable for ages 10-14."
+    },
+    {
+      "id": "factual",
+      "label": "Factual accuracy",
+      "critical": true,
+      "description": "If the passage is informational, every stated fact is accurate. Automatically passes for clearly fictional narratives."
+    }
+  ],
+  "passRule": "A passage PASSES only if every critical criterion passes AND at most one non-critical criterion fails."
+}

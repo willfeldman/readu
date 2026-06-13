@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { PassageRequest, PassageResponse, SessionMode, SkillId } from "@/lib/types";
-import { generatePassage, NoApiKeyError } from "@/lib/generate";
+import { generateVerifiedPassage, NoApiKeyError } from "@/lib/generate";
 import { getLibraryPassage } from "@/lib/content";
 
 export const runtime = "nodejs";
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   };
 
   try {
-    const passage = await generatePassage(req);
+    const passage = await generateVerifiedPassage(req);
     const res: PassageResponse = { passage, source: "ai" };
     return NextResponse.json(res);
   } catch (err) {

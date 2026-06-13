@@ -1,8 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { Passage, PassageRequest, RawPassage } from "./types";
+import type { Passage, PassageRequest, RawPassage, VerificationResult } from "./types";
 import { bandForLevel, clamp } from "./adaptive";
 import { INTEREST_MAP, INTERESTS, SKILL_MAP } from "./skills";
 import { toPassage } from "./content";
+import { PASSAGE_SCHEMA, validatePassageShape } from "./schema";
+import { verifyPassage, type VerifyContext } from "./verify";
 
 const MODEL = "claude-opus-4-8";
 
@@ -13,57 +15,7 @@ export class NoApiKeyError extends Error {
   }
 }
 
-const PASSAGE_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    title: { type: "string", description: "Catchy, kid-friendly title (3-8 words)." },
-    summary: { type: "string", description: "One-sentence, spoiler-free teaser shown before reading." },
-    passage: { type: "string", description: "The full reading passage text, in the requested word range." },
-    questions: {
-      type: "array",
-      description: "Exactly 5 multiple-choice comprehension questions.",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          skill: {
-            type: "string",
-            enum: [
-              "main_idea",
-              "detail",
-              "inference",
-              "vocabulary",
-              "cause_effect",
-              "sequence",
-              "authors_purpose",
-              "figurative",
-            ],
-          },
-          question: { type: "string" },
-          options: { type: "array", items: { type: "string" }, description: "Exactly 4 answer choices." },
-          correctIndex: { type: "integer", description: "0-based index (0-3) of the correct option." },
-          explanation: { type: "string", description: "Kid-friendly one-sentence reason the answer is correct." },
-        },
-        required: ["skill", "question", "options", "correctIndex", "explanation"],
-      },
-    },
-    vocabulary: {
-      type: "array",
-      description: "Exactly 4 vocabulary words drawn from the passage.",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          word: { type: "string" },
-          definition: { type: "string", description: "Short, kid-friendly definition." },
-        },
-        required: ["word", "definition"],
-      },
-    },
-  },
-  required: ["title", "summary", "passage", "questions", "vocabulary"],
-};
+// PASSAGE_SCHEMA + validatePassageShape now live in ./schema.ts (pure, testable).
 
 function wordsForGrade(grade: number): string {
   if (grade <= 4) return "190-260 words";
@@ -88,7 +40,7 @@ Principles:
 - Each "vocabulary" question must target a word that actually appears in the passage.
 - "correctIndex" is 0-based and must point to the correct option.`;
 
-function buildUserPrompt(req: PassageRequest, interestLabel: string, grade: number): string {
+function buildUserPrompt(req: PassageRequest, interestLabel: string, grade: number, critique?: string): string {
   const focus = (req.focusSkills ?? [])
     .map((s) => SKILL_MAP[s]?.label)
     .filter(Boolean) as string[];
@@ -105,6 +57,10 @@ function buildUserPrompt(req: PassageRequest, interestLabel: string, grade: numb
       ? `\nAvoid repeating these recently used titles/topics: ${req.excludeTitles.slice(0, 8).join("; ")}.`
       : "";
 
+  const fixLine = critique
+    ? `\n\nA previous draft was REJECTED by the quality checker. Produce a NEW version that fixes these issues:\n${critique}\n`
+    : "";
+
   return `Write ONE reading passage and its comprehension question set.
 
 THEME: ${interestLabel}
@@ -112,24 +68,9 @@ TARGET READING LEVEL: U.S. Grade ${grade}.
 LENGTH: ${wordsForGrade(grade)}.
 GENRE: Choose whichever fits the theme best and is most engaging for this age — an informational article OR a short narrative story.
 
-${focusLine}${excludeLine}
+${focusLine}${excludeLine}${fixLine}
 
 Write exactly 5 questions (each with exactly 4 options), a one-sentence spoiler-free "summary" teaser, and exactly 4 vocabulary words pulled from the passage. Return only the structured object.`;
-}
-
-function validate(p: any): asserts p is Omit<RawPassage, "interestId" | "interestLabel" | "band" | "grade"> {
-  if (!p || typeof p.passage !== "string" || p.passage.length < 40) {
-    throw new Error("Malformed passage from model");
-  }
-  if (!Array.isArray(p.questions) || p.questions.length === 0) {
-    throw new Error("No questions returned");
-  }
-  for (const q of p.questions) {
-    if (!Array.isArray(q.options) || q.options.length < 2) throw new Error("Bad options");
-    if (typeof q.correctIndex !== "number" || q.correctIndex < 0 || q.correctIndex >= q.options.length) {
-      throw new Error("Bad correctIndex");
-    }
-  }
 }
 
 /**
@@ -137,7 +78,10 @@ function validate(p: any): asserts p is Omit<RawPassage, "interestId" | "interes
  * Throws NoApiKeyError if no key is configured, or a generic Error on failure — the
  * caller is expected to fall back to the built-in library.
  */
-export async function generatePassage(req: PassageRequest): Promise<Passage> {
+export async function generatePassage(
+  req: PassageRequest,
+  opts: { critique?: string } = {},
+): Promise<Passage> {
   if (!process.env.ANTHROPIC_API_KEY) throw new NoApiKeyError();
 
   const client = new Anthropic();
@@ -154,14 +98,15 @@ export async function generatePassage(req: PassageRequest): Promise<Passage> {
       format: { type: "json_schema", schema: PASSAGE_SCHEMA },
     },
     system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: buildUserPrompt(req, interest.label, grade) }],
+    messages: [{ role: "user", content: buildUserPrompt(req, interest.label, grade, opts.critique) }],
   } as any, { timeout: 45000, maxRetries: 1 });
 
   const text: string | undefined = (response.content ?? []).find((b: any) => b.type === "text")?.text;
   if (!text) throw new Error("No text content returned from model");
 
   const parsed = JSON.parse(text);
-  validate(parsed);
+  const shape = validatePassageShape(parsed);
+  if (!shape.ok) throw new Error(`Malformed passage from model: ${shape.errors.join("; ")}`);
 
   const raw: RawPassage = {
     interestId: interest.id,
@@ -176,4 +121,60 @@ export async function generatePassage(req: PassageRequest): Promise<Passage> {
   };
 
   return toPassage(raw, "ai");
+}
+
+export function wordRangeForGrade(grade: number): { min: number; max: number } {
+  if (grade <= 4) return { min: 190, max: 260 };
+  if (grade <= 6) return { min: 300, max: 410 };
+  return { min: 440, max: 560 };
+}
+
+/**
+ * Generate → self-grade against rubric.json → (regenerate once with the critique) → return the
+ * best attempt with its verification attached. Generation errors propagate so the route can fall
+ * back to the library; a verification error degrades gracefully to an unverified passage.
+ */
+export async function generateVerifiedPassage(req: PassageRequest): Promise<Passage> {
+  const grade = clamp(Math.round(req.level), 3, 9);
+  const ctx: VerifyContext = {
+    targetGrade: grade,
+    focusSkills: req.focusSkills,
+    wordRange: wordRangeForGrade(grade),
+  };
+
+  const first = await generatePassage(req);
+
+  let firstVerif: VerificationResult;
+  try {
+    firstVerif = await verifyPassage(first, ctx);
+  } catch (err) {
+    console.error("[readu] verification unavailable, returning unverified draft:", err);
+    return first;
+  }
+
+  if (firstVerif.pass) {
+    return { ...first, verification: { ...firstVerif, attempts: 1, regenerated: false } };
+  }
+
+  // Failed grade → one regeneration with the critique fed back into the prompt.
+  let second: Passage;
+  try {
+    second = await generatePassage(req, { critique: firstVerif.critique });
+  } catch {
+    return { ...first, verification: { ...firstVerif, attempts: 2, regenerated: true } };
+  }
+
+  let secondVerif: VerificationResult;
+  try {
+    secondVerif = await verifyPassage(second, ctx);
+  } catch {
+    return { ...second, verification: { ...firstVerif, pass: false, attempts: 2, regenerated: true } };
+  }
+
+  const firstScore = firstVerif.perCriterion.filter((c) => c.pass).length;
+  const secondScore = secondVerif.perCriterion.filter((c) => c.pass).length;
+  if (secondVerif.pass || secondScore >= firstScore) {
+    return { ...second, verification: { ...secondVerif, attempts: 2, regenerated: true } };
+  }
+  return { ...first, verification: { ...firstVerif, attempts: 2, regenerated: true } };
 }
