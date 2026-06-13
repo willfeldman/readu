@@ -7,6 +7,14 @@ target the comprehension skills they most need to grow.
 
 Built for Build Day. Powered by **Claude (Opus 4.8)**.
 
+**▶ Live demo — [readu-five.vercel.app](https://readu-five.vercel.app)**
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/willfeldman/readu&project-name=readu&repository-name=readu)
+
+> One click deploys ReadU in **library mode** — no setup, works instantly. To enable
+> live, per-session passage generation, add an `ANTHROPIC_API_KEY` environment variable
+> in your Vercel project afterward (get one at [console.anthropic.com](https://console.anthropic.com)).
+
 ---
 
 ## ✨ What it does
