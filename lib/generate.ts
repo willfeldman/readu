@@ -155,7 +155,7 @@ export async function generatePassage(req: PassageRequest): Promise<Passage> {
     },
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: buildUserPrompt(req, interest.label, grade) }],
-  } as any);
+  } as any, { timeout: 45000, maxRetries: 1 });
 
   const text: string | undefined = (response.content ?? []).find((b: any) => b.type === "text")?.text;
   if (!text) throw new Error("No text content returned from model");
